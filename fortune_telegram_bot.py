@@ -28,7 +28,7 @@ def capture_full_screen():
         print("🚀 네이버 접속 및 캡처 중...")
         url = "https://m.search.naver.com/search.naver?query=띠별+운세"
         driver.get(url)
-        time.sleep(10) # 화면이 다 뜰 때까지 충분히 대기
+        time.sleep(10)
 
         screenshot = driver.get_screenshot_as_png()
         driver.quit()
@@ -39,11 +39,10 @@ def capture_full_screen():
 
 def summarize_fortune_image(image_base64):
     today = datetime.now().strftime("%Y년 %m월 %d일")
-    # 분석 성능이 더 좋은 1.5-flash 모델 사용
-    api_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
+    # 가장 범용적인 비전 모델인 gemini-1.0-pro-vision으로 교체 (v1beta 버전 사용)
+    api_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.0-pro-vision:generateContent?key={GEMINI_API_KEY}"
     
-    # AI가 거절하지 않도록 프롬프트를 더 단순하고 명확하게 수정
-    prompt = f"이 사진은 {today} 네이버 띠별 운세 검색 결과야. 사진 속에 보이는 12개 띠의 운세 내용을 각각 한 줄씩만 아주 짧게 요약해서 리스트로 만들어줘."
+    prompt = f"이 사진은 {today} 네이버 띠별 운세 검색 결과야. 사진 속에 보이는 12개 띠의 운세 내용을 각각 한 줄씩만 요약해서 보내줘."
 
     payload = {
         "contents": [{
@@ -51,25 +50,19 @@ def summarize_fortune_image(image_base64):
                 {"text": prompt},
                 {"inline_data": {"mime_type": "image/png", "data": image_base64}}
             ]
-        }],
-        "safetySettings": [ # 안전 필터로 인해 답변이 막히는 것을 방지
-            {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
-            {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
-            {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
-            {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"}
-        ]
+        }]
     }
 
     try:
         res = requests.post(api_url, json=payload, timeout=60)
         data = res.json()
         
-        # 답변이 정상적으로 왔는지 확인하는 로직 강화
         if 'candidates' in data and data['candidates'][0].get('content'):
             return data['candidates'][0]['content']['parts'][0]['text'].strip()
         else:
-            print(f"🔍 AI 응답 구조: {data}")
-            return f"🔮 {today} 운세 요약 실패 (AI가 답변을 생성하지 못했습니다. 다시 시도해 주세요.)"
+            # 에러 발생 시 상세 로그 출력
+            print(f"🔍 AI 응답 에러 상세: {data}")
+            return f"🔮 {today} 운세 요약 실패 (상세: {data.get('error', {}).get('message', '알 수 없는 오류')})"
     except Exception as e:
         return f"⚠️ 에러 발생: {str(e)}"
 
