@@ -28,7 +28,7 @@ def capture_full_screen():
         print("🚀 네이버 접속 및 캡처 중...")
         url = "https://m.search.naver.com/search.naver?query=띠별+운세"
         driver.get(url)
-        time.sleep(10)
+        time.sleep(12) # 로딩 시간을 조금 더 늘렸습니다.
 
         screenshot = driver.get_screenshot_as_png()
         driver.quit()
@@ -39,10 +39,10 @@ def capture_full_screen():
 
 def summarize_fortune_image(image_base64):
     today = datetime.now().strftime("%Y년 %m월 %d일")
-    # 가장 범용적인 비전 모델인 gemini-1.0-pro-vision으로 교체 (v1beta 버전 사용)
-    api_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.0-pro-vision:generateContent?key={GEMINI_API_KEY}"
+    # 최신 주소 체계인 v1으로 시도하고, 모델명에 'latest'를 붙였습니다.
+    api_url = f"https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash-latest:generateContent?key={GEMINI_API_KEY}"
     
-    prompt = f"이 사진은 {today} 네이버 띠별 운세 검색 결과야. 사진 속에 보이는 12개 띠의 운세 내용을 각각 한 줄씩만 요약해서 보내줘."
+    prompt = f"이미지에 보이는 {today} 띠별 운세 내용을 각 띠별로 한 줄씩 요약해줘. 형식은 '띠이모지 띠이름: 요약내용'으로 해줘."
 
     payload = {
         "contents": [{
@@ -57,14 +57,20 @@ def summarize_fortune_image(image_base64):
         res = requests.post(api_url, json=payload, timeout=60)
         data = res.json()
         
+        # 만약 v1에서 실패하면 v1beta로 다시 한 번 자동 시도
+        if 'error' in data and data['error']['code'] == 404:
+            print("⚠️ v1 실패, v1beta로 재시도 중...")
+            api_url_beta = api_url.replace("/v1/", "/v1beta/")
+            res = requests.post(api_url_beta, json=payload, timeout=60)
+            data = res.json()
+
         if 'candidates' in data and data['candidates'][0].get('content'):
             return data['candidates'][0]['content']['parts'][0]['text'].strip()
         else:
-            # 에러 발생 시 상세 로그 출력
-            print(f"🔍 AI 응답 에러 상세: {data}")
-            return f"🔮 {today} 운세 요약 실패 (상세: {data.get('error', {}).get('message', '알 수 없는 오류')})"
+            print(f"🔍 최종 응답 에러 상세: {data}")
+            return f"🔮 {today} 운세 요약 실패 (상세: {data.get('error', {}).get('message', '응답 구조 에러')})"
     except Exception as e:
-        return f"⚠️ 에러 발생: {str(e)}"
+        return f"⚠️ 시스템 에러: {str(e)}"
 
 def send_telegram(message):
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
@@ -76,9 +82,9 @@ def main():
     if img:
         msg = summarize_fortune_image(img)
         send_telegram(msg)
-        print("✅ 전송 완료!")
+        print("✅ 전송 시도 완료!")
     else:
-        print("❌ 실패")
+        print("❌ 캡처 실패")
 
 if __name__ == "__main__":
     main()
