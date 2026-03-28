@@ -27,18 +27,22 @@ def capture_naver_fortune():
         driver = webdriver.Chrome(service=service, options=options)
         
         print("🚀 네이버 띠별 운세 접속 중...")
-        url = "https://m.search.naver.com/search.naver?query=띠별%20운세"
+        # 띠별 운세 탭이 바로 보이는 주소로 변경
+        url = "https://m.search.naver.com/search.naver?query=띠별+운세"
         driver.get(url)
-        time.sleep(5) # 로딩 대기 시간을 조금 더 늘렸습니다.
+        time.sleep(7) # 로딩 시간을 넉넉히 7초로 늘렸습니다.
 
-        # 운세 리스트 영역 캡처
-        fortune_section = driver.find_element(By.CSS_SELECTOR, '.content_area')
+        # 캡처할 영역의 이름을 정확하게 수정 (._cs_fortune_list)
+        print("📸 운세 영역 찾는 중...")
+        fortune_section = driver.find_element(By.CSS_SELECTOR, '._cs_fortune_list')
+        
         screenshot = fortune_section.screenshot_as_png
         driver.quit()
 
         return base64.b64encode(screenshot).decode('utf-8')
     except Exception as e:
         print(f"❌ 캡처 에러: {e}")
+        if 'driver' in locals(): driver.quit()
         return None
 
 def summarize_fortune_image(image_base64):
@@ -50,12 +54,12 @@ def summarize_fortune_image(image_base64):
     
     prompt = f"""
     오늘 날짜: {today}
-    이미지에 있는 12개 띠의 운세 내용을 확인하고 요약해줘.
-    형식:
+    이미지에 보이는 12개 띠의 운세를 확인하고 요약해줘.
+    [형식]
     🔮 오늘의 띠별 운세 요약
     🐭 쥐띠: [한 줄 요약]
     ... (12개 띠 전부)
-    친절하고 긍정적인 말투로 작성해줘.
+    친절하고 희망찬 말투로 작성해줘.
     """
 
     payload = {
@@ -71,7 +75,7 @@ def summarize_fortune_image(image_base64):
         res = requests.post(url, json=payload, timeout=60)
         summary = res.json()['candidates'][0]['content']['parts'][0]['text'].strip()
         return summary
-    except Exception as e: # 여기서 오타를 수정했습니다!
+    except Exception as e:
         print(f"⚠️ 요약 실패: {e}")
         return f"🔮 {today} 운세 분석 중 오류가 발생했습니다."
 
