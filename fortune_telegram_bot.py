@@ -1,84 +1,57 @@
-import os
-import requests
-import base64
-import time
-from datetime import datetime
+import os, requests, base64, time
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from webdriver_manager.chrome import ChromeDriverManager
 from selenium.webdriver.chrome.service import Service
 
-# 환경 변수 확인
-GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY', '')
-TELEGRAM_BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN', '')
-TELEGRAM_CHAT_ID = os.environ.get('TELEGRAM_CHAT_ID', '')
-
 def main():
-    print("--- 🏁 프로세스 시작 ---")
+    # 1. 환경 변수 설정
+    api_key = os.environ.get('GEMINI_API_KEY')
+    tg_token = os.environ.get('TELEGRAM_BOT_TOKEN')
+    chat_id = os.environ.get('TELEGRAM_CHAT_ID')
     
-    # 1. 브라우저 설정 (GitHub Actions 최적화)
+    # 2. 네이버 캡처
     options = Options()
     options.add_argument('--headless')
     options.add_argument('--no-sandbox')
     options.add_argument('--disable-dev-shm-usage')
-    options.add_argument('--disable-gpu') # GPU 비활성화 추가
     options.add_argument('--window-size=1080,3000')
     
-    print("🚀 크롬 드라이버 설치 및 시작 중...")
+    driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
     try:
-        service = Service(ChromeDriverManager().install())
-        driver = webdriver.Chrome(service=service, options=options)
-        
-        print("🔗 네이버 띠별 운세 접속 중...")
         driver.get("https://m.search.naver.com/search.naver?query=띠별+운세")
-        
-        # 페이지 로딩 대기 및 결과 확인
         time.sleep(15) 
-        print(f"📄 현재 페이지 제목: {driver.title}")
-        
-        screenshot = driver.get_screenshot_as_png()
-        img_data = base64.b64encode(screenshot).decode('utf-8')
-        print("📸 캡처 성공 및 인코딩 완료")
+        img_data = base64.b64encode(driver.get_screenshot_as_png()).decode('utf-8')
+    finally:
         driver.quit()
-    except Exception as e:
-        print(f"❌ 캡처 단계 실패: {str(e)}")
-        return
 
-    # 2. Gemini API 호출
-    print("🧠 Gemini AI에게 분석 요청 중...")
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
+    # 3. Gemini 요청 (v1 주소와 gemini-1.5-flash 모델명 고정)
+    # 현재 성민님의 키 설정에 가장 적합한 경로입니다.
+    url = f"https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key={api_key}"
     
     payload = {
         "contents": [{
             "parts": [
-                {"text": "사진 속 12개 띠의 운세를 한 줄씩 요약해줘."},
+                {"text": "이미지에 있는 12개 띠별 운세를 한 줄씩 짧게 요약해서 보내줘."},
                 {"inline_data": {"mime_type": "image/png", "data": img_data}}
             ]
         }]
     }
 
-    try:
-        res = requests.post(url, json=payload, timeout=60)
-        data = res.json()
-        
-        if 'candidates' in data:
-            fortune_text = data['candidates'][0]['content']['parts'][0]['text']
-            print("✅ AI 요약 성공")
-        else:
-            fortune_text = f"AI 응답 오류: {data}"
-            print(f"❌ AI 응답에 'candidates'가 없음: {data}")
-    except Exception as e:
-        fortune_text = f"API 호출 중 에러 발생: {str(e)}"
-        print(f"❌ API 호출 에러: {str(e)}")
+    # 4. 결과 발송
+    res = requests.post(url, json=payload)
+    result = res.json()
 
-    # 3. 텔레그램 발송
-    print("📤 텔레그램 전송 중...")
     try:
-        tg_res = requests.post(f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage", 
-                               json={"chat_id": TELEGRAM_CHAT_ID, "text": fortune_text}, timeout=10)
-        print(f"🎉 전송 시도 완료 (결과: {tg_res.status_code})")
-    except Exception as e:
-        print(f"❌ 텔레그램 전송 실패: {str(e)}")
+        # 정상 응답 시 메시지 추출
+        msg = result['candidates'][0]['content']['parts'][0]['text']
+    except:
+        # 실패 시 에러 사유 발송
+        error_msg = result.get('error', {}).get('message', '알 수 없는 오류')
+        msg = f"🔮 운세 요약 실패\n사유: {error_msg}"
+
+    requests.post(f"https://api.telegram.org/bot{tg_token}/sendMessage", 
+                  json={"chat_id": chat_id, "text": msg})
 
 if __name__ == "__main__":
     main()
