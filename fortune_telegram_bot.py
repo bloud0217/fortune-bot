@@ -24,12 +24,10 @@ def capture_full_screen():
     try:
         service = Service(ChromeDriverManager().install())
         driver = webdriver.Chrome(service=service, options=options)
-        
-        print("🚀 네이버 접속 및 캡처 중...")
+        print("🚀 네이버 접속 중...")
         url = "https://m.search.naver.com/search.naver?query=띠별+운세"
         driver.get(url)
-        time.sleep(12) # 로딩 시간을 조금 더 늘렸습니다.
-
+        time.sleep(12)
         screenshot = driver.get_screenshot_as_png()
         driver.quit()
         return base64.b64encode(screenshot).decode('utf-8')
@@ -39,38 +37,44 @@ def capture_full_screen():
 
 def summarize_fortune_image(image_base64):
     today = datetime.now().strftime("%Y년 %m월 %d일")
-    # 최신 주소 체계인 v1으로 시도하고, 모델명에 'latest'를 붙였습니다.
-    api_url = f"https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash-latest:generateContent?key={GEMINI_API_KEY}"
+    # 시도해볼 모델 후보군 리스트
+    model_candidates = [
+        "gemini-1.5-flash",
+        "gemini-1.5-flash-latest",
+        "gemini-pro-vision"
+    ]
     
-    prompt = f"이미지에 보이는 {today} 띠별 운세 내용을 각 띠별로 한 줄씩 요약해줘. 형식은 '띠이모지 띠이름: 요약내용'으로 해줘."
-
+    prompt = f"이 사진은 {today} 네이버 띠별 운세야. 12개 띠의 운세를 찾아서 한 줄씩 요약해줘."
     payload = {
-        "contents": [{
-            "parts": [
-                {"text": prompt},
-                {"inline_data": {"mime_type": "image/png", "data": image_base64}}
-            ]
-        }]
+        "contents": [{"parts": [
+            {"text": prompt},
+            {"inline_data": {"mime_type": "image/png", "data": image_base64}}
+        ]}]
     }
 
-    try:
-        res = requests.post(api_url, json=payload, timeout=60)
-        data = res.json()
-        
-        # 만약 v1에서 실패하면 v1beta로 다시 한 번 자동 시도
-        if 'error' in data and data['error']['code'] == 404:
-            print("⚠️ v1 실패, v1beta로 재시도 중...")
-            api_url_beta = api_url.replace("/v1/", "/v1beta/")
-            res = requests.post(api_url_beta, json=payload, timeout=60)
+    # 성공할 때까지 모델을 바꿔가며 시도
+    for model in model_candidates:
+        print(f"🔄 {model} 모델로 시도 중...")
+        # v1 버전으로 우선 시도
+        api_url = f"https://generativelanguage.googleapis.com/v1/models/{model}:generateContent?key={GEMINI_API_KEY}"
+        try:
+            res = requests.post(api_url, json=payload, timeout=60)
             data = res.json()
+            
+            # 성공 시 결과 반환
+            if 'candidates' in data and data[0].get('content') or 'candidates' in data and len(data['candidates']) > 0:
+                return data['candidates'][0]['content']['parts'][0]['text'].strip()
+            
+            # v1 실패 시 v1beta로 한 번 더 시도
+            print(f"⚠️ {model} (v1) 실패, v1beta 재시도...")
+            res_beta = requests.post(api_url.replace("/v1/", "/v1beta/"), json=payload, timeout=60)
+            data_beta = res_beta.json()
+            if 'candidates' in data_beta:
+                return data_beta['candidates'][0]['content']['parts'][0]['text'].strip()
+        except:
+            continue
 
-        if 'candidates' in data and data['candidates'][0].get('content'):
-            return data['candidates'][0]['content']['parts'][0]['text'].strip()
-        else:
-            print(f"🔍 최종 응답 에러 상세: {data}")
-            return f"🔮 {today} 운세 요약 실패 (상세: {data.get('error', {}).get('message', '응답 구조 에러')})"
-    except Exception as e:
-        return f"⚠️ 시스템 에러: {str(e)}"
+    return f"🔮 {today} 모든 AI 모델 시도 실패. API 키의 모델 권한을 확인해주세요."
 
 def send_telegram(message):
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
@@ -82,9 +86,9 @@ def main():
     if img:
         msg = summarize_fortune_image(img)
         send_telegram(msg)
-        print("✅ 전송 시도 완료!")
+        print("✅ 프로세스 종료")
     else:
-        print("❌ 캡처 실패")
+        print("❌ 실패")
 
 if __name__ == "__main__":
     main()
