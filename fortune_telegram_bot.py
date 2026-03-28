@@ -9,7 +9,7 @@ def main():
     TG_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN')
     CHAT_ID = os.environ.get('TELEGRAM_CHAT_ID')
 
-    # 1. 네이버 캡처
+    # 1. 네이버 캡처 (이제 이건 확실히 잘 됩니다)
     options = Options()
     options.add_argument('--headless')
     options.add_argument('--no-sandbox')
@@ -23,40 +23,44 @@ def main():
     finally:
         driver.quit()
 
-    # 2. 후보 모델 리스트 (성민님 계정에서 허용될 가능성이 높은 순서)
-    # 404 에러를 피하기 위해 가장 보편적인 모델들로 구성했습니다.
-    model_candidates = [
-        "gemini-1.5-flash-8b", 
-        "gemini-1.5-flash",
-        "gemini-1.5-pro"
-    ]
-
-    fortune_text = "운세 요약 실패"
+    # 2. 내 API 키가 쓸 수 있는 모델 목록 가져오기
+    list_url = f"https://generativelanguage.googleapis.com/v1beta/models?key={API_KEY}"
+    models_data = requests.get(list_url).json()
     
-    for model in model_candidates:
-        print(f"🔄 {model} 모델로 시도 중...")
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={API_KEY}"
-        
-        payload = {
-            "contents": [{
-                "parts": [
-                    {"text": "12개 띠별 운세를 한 줄씩 요약해줘."},
-                    {"inline_data": {"mime_type": "image/png", "data": img_data}}
-                ]
-            }]
-        }
+    # 1.5-flash 계열의 이름을 가진 모델 중 하나를 자동으로 선택
+    actual_model_name = "models/gemini-1.5-flash" # 기본값
+    try:
+        for m in models_data.get('models', []):
+            if 'gemini-1.5-flash' in m['name']:
+                actual_model_name = m['name']
+                break
+    except:
+        pass
 
-        res = requests.post(url, json=payload)
-        data = res.json()
+    # 3. 찾은 모델 이름으로 요약 요청
+    print(f"🎯 선택된 모델 이름: {actual_model_name}")
+    url = f"https://generativelanguage.googleapis.com/v1beta/{actual_model_name}:generateContent?key={API_KEY}"
+    
+    payload = {
+        "contents": [{
+            "parts": [
+                {"text": "12개 띠별 운세를 한 줄씩 짧게 요약해줘."},
+                {"inline_data": {"mime_type": "image/png", "data": img_data}}
+            ]
+        }]
+    }
 
-        if 'candidates' in data:
-            fortune_text = data['candidates'][0]['content']['parts'][0]['text']
-            print(f"✅ {model} 모델로 성공!")
-            break
-        else:
-            print(f"❌ {model} 실패: {data.get('error', {}).get('message', 'Unknown')}")
+    res = requests.post(url, json=payload)
+    data = res.json()
 
-    # 3. 텔레그램 전송
+    # 4. 결과 발송
+    try:
+        fortune_text = data['candidates'][0]['content']['parts'][0]['text']
+    except:
+        # 에러 시 어떤 모델 목록이 있었는지 상세히 출력 (디버깅용)
+        available_names = [m['name'] for m in models_data.get('models', [])[:3]]
+        fortune_text = f"실패 사유: {data.get('error', {}).get('message', '구조 에러')}\n사용 가능 목록: {available_names}"
+
     requests.post(f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage", 
                   json={"chat_id": CHAT_ID, "text": fortune_text})
 
