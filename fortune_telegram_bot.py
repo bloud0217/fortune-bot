@@ -9,78 +9,66 @@ TELEGRAM_BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN', '')
 TELEGRAM_CHAT_ID = os.environ.get('TELEGRAM_CHAT_ID', '')
 
 def get_naver_fortune(zodiac):
-    """네이버 모바일 버전 주소를 사용하여 더 정확하게 운세 크롤링"""
-    zodiac_map = {"쥐": "84", "소": "85", "호랑이": "86", "토끼": "87", "용": "88", "뱀": "89", "말": "90", "양": "91", "원숭이": "92", "닭": "93", "개": "94", "돼지": "95"}
-    
-    # 더 안정적인 모바일 검색 결과 페이지 활용
-    url = f"https://m.search.naver.com/search.naver?query={zodiac}띠+오늘의+운세"
-    headers = {'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1'}
+    """네이버에서 실제 운세 텍스트를 뽑아내는 가장 확실한 방법"""
+    # 검색어를 더 구체적으로 설정 (예: '쥐띠 오늘의 운세')
+    url = f"https://search.naver.com/search.naver?query={zodiac}띠+오늘의+운세"
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+    }
     
     try:
         res = requests.get(url, headers=headers, timeout=15)
         soup = BeautifulSoup(res.text, 'html.parser')
         
-        # 실제 운세 텍스트가 들어있는 영역 추출
-        content = soup.select_one('p.dsc')
+        # 방식 1: 상세 정보 박스(p.dsc) 직접 타겟팅
+        content = soup.select_one('div.detail_info p.dsc')
         if content:
             return content.get_text(strip=True)
-        
-        # 대안 구조 탐색
-        content_alt = soup.select_one('._cs_fortune_text')
+            
+        # 방식 2: 다른 클래스명(api_txt_lines) 검색
+        content_alt = soup.select_one('.api_txt_lines.dsc_txt')
         if content_alt:
             return content_alt.get_text(strip=True)
             
-        return "운세 정보를 찾을 수 없습니다."
-    except:
-        return "데이터를 가져오는 중 오류가 발생했습니다."
+        # 방식 3: 텍스트가 포함된 div 전체에서 가장 긴 문장 찾기 (최후의 수단)
+        texts = soup.select('.detail_info')
+        if texts:
+            return texts[0].get_text(" ", strip=True)
+
+        return f"{zodiac}띠 운세 내용을 찾지 못했습니다."
+    except Exception as e:
+        return f"에러 발생: {str(e)}"
 
 def summarize_all_with_gemini(all_fortunes):
-    """12개 띠 운세를 하나의 요약 메시지로 변환"""
+    """12개 띠 운세를 하나의 메시지로 요약"""
     today = datetime.now().strftime("%Y년 %m월 %d일")
     
+    # Gemini API가 없거나 에러날 경우 대비한 기본 메시지 구성
+    default_msg = f"🔮 {today} 띠별 운세 요약\n\n" + "\n".join(all_fortunes)
+
     if not GEMINI_API_KEY:
-        # Gemini 키가 없을 경우 원문 합쳐서 반환
-        return f"🔮 {today} 띠별 운세\n\n" + "\n".join(all_fortunes)
+        return default_msg
 
     prompt = (
         f"오늘 날짜: {today}\n"
-        f"다음은 12개 띠의 운세 원문들입니다: {all_fortunes}\n\n"
-        "위 내용을 바탕으로 다음 형식의 '하나의 메시지'를 작성해줘:\n"
-        "1. 제목: 🔮 오늘의 띠별 운세 요약\n"
-        "2. 내용: 각 띠별로 한 줄씩, 아주 핵심적인 내용만 이모지와 함께 요약 (예: 🐭 쥐띠: 금전운이 좋으니 적극적으로 움직이세요)\n"
-        "3. 말투: 친절하고 긍정적인 말투로 작성할 것"
+        f"12개 띠 운세 원문: {all_fortunes}\n\n"
+        "위 원문들을 바탕으로 텔레그램에 보낼 요약본을 만들어줘.\n"
+        "형식:\n"
+        "🔮 오늘의 띠별 운세 요약\n"
+        "각 띠별로 [띠 이모지] [띠 이름]: [한 줄 핵심 요약]\n"
+        "예시: 🐭 쥐띠: 뜻밖의 행운이 찾아오니 적극적으로 움직이세요.\n"
+        "말투는 친절하고 희망차게 작성해줘."
     )
 
     try:
         url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key={GEMINI_API_KEY}"
         payload = {"contents": [{"parts": [{"text": prompt}]}]}
         res = requests.post(url, json=payload, timeout=30)
-        return res.json()['candidates'][0]['content']['parts'][0]['text'].strip()
+        summary = res.json()['candidates'][0]['content']['parts'][0]['text'].strip()
+        return summary
     except:
-        return f"🔮 {today} 띠별 운세 요약본을 만드는 데 실패했습니다.\n\n" + "\n".join(all_fortunes)
+        return default_msg
 
 def send_telegram(message):
-    """하나의 통합 메시지 전송"""
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     payload = {"chat_id": TELEGRAM_CHAT_ID, "text": message}
-    requests.post(url, json=payload, timeout=10)
-
-def main():
-    zodiac_list = ["쥐", "소", "호랑이", "토끼", "용", "뱀", "말", "양", "원숭이", "닭", "개", "돼지"]
-    results = []
-    
-    print("🚀 운세 수집 시작...")
-    for zodiac in zodiac_list:
-        print(f"gathering: {zodiac}")
-        fortune = get_naver_fortune(zodiac)
-        results.append(f"{zodiac}띠: {fortune}")
-        time.sleep(1) # 차단 방지용 미세 지연
-
-    print("📝 요약 및 전송 중...")
-    all_text = "\n".join(results)
-    final_message = summarize_all_with_gemini(all_text)
-    send_telegram(final_message)
-    print("✅ 전송 완료!")
-
-if __name__ == "__main__":
-    main()
