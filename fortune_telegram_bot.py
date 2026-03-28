@@ -17,7 +17,7 @@ def capture_full_screen():
     options.add_argument('--headless')
     options.add_argument('--no-sandbox')
     options.add_argument('--disable-dev-shm-usage')
-    options.add_argument('--window-size=1080,3000') # 길게 찍히도록 세로 크기 확장
+    options.add_argument('--window-size=1080,3000') 
     options.add_argument('lang=ko_KR')
     options.add_argument('--user-agent=Mozilla/5.0 (iPhone; CPU iPhone OS 15_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/15.0 Mobile/15E148 Safari/604.1')
 
@@ -25,42 +25,25 @@ def capture_full_screen():
         service = Service(ChromeDriverManager().install())
         driver = webdriver.Chrome(service=service, options=options)
         
-        print("🚀 네이버 띠별 운세 접속 중...")
+        print("🚀 네이버 접속 및 캡처 중...")
         url = "https://m.search.naver.com/search.naver?query=띠별+운세"
         driver.get(url)
-        time.sleep(10) # 로딩 대기
+        time.sleep(10) # 화면이 다 뜰 때까지 충분히 대기
 
-        print("📸 전체 화면 캡처 중...")
         screenshot = driver.get_screenshot_as_png()
         driver.quit()
-
         return base64.b64encode(screenshot).decode('utf-8')
     except Exception as e:
         print(f"❌ 캡처 에러: {e}")
-        if 'driver' in locals(): driver.quit()
         return None
 
 def summarize_fortune_image(image_base64):
     today = datetime.now().strftime("%Y년 %m월 %d일")
-    if not image_base64:
-        return f"🔮 {today} 화면 캡처에 실패했습니다."
-
-    # API 주소를 한 줄로 정확하게 연결했습니다.
+    # 분석 성능이 더 좋은 1.5-flash 모델 사용
     api_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
     
-    prompt = f"""
-    오늘 날짜: {today}
-    이 이미지는 네이버 띠별 운세 검색 결과야.
-    사진 속의 12개 띠(쥐~돼지) 운세 내용을 모두 찾아서 요약해줘.
-    
-    [형식]
-    🔮 오늘의 띠별 운세 요약 ({today})
-    🐭 쥐띠: [한 줄 요약]
-    🐮 소띠: [한 줄 요약]
-    ... (12개 띠 전부 포함)
-    
-    친절하고 긍정적인 말투로 한 통의 메시지로 작성해줘.
-    """
+    # AI가 거절하지 않도록 프롬프트를 더 단순하고 명확하게 수정
+    prompt = f"이 사진은 {today} 네이버 띠별 운세 검색 결과야. 사진 속에 보이는 12개 띠의 운세 내용을 각각 한 줄씩만 아주 짧게 요약해서 리스트로 만들어줘."
 
     payload = {
         "contents": [{
@@ -68,31 +51,41 @@ def summarize_fortune_image(image_base64):
                 {"text": prompt},
                 {"inline_data": {"mime_type": "image/png", "data": image_base64}}
             ]
-        }]
+        }],
+        "safetySettings": [ # 안전 필터로 인해 답변이 막히는 것을 방지
+            {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
+            {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
+            {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
+            {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"}
+        ]
     }
 
     try:
         res = requests.post(api_url, json=payload, timeout=60)
-        result = res.json()
-        summary = result['candidates'][0]['content']['parts'][0]['text'].strip()
-        return summary
+        data = res.json()
+        
+        # 답변이 정상적으로 왔는지 확인하는 로직 강화
+        if 'candidates' in data and data['candidates'][0].get('content'):
+            return data['candidates'][0]['content']['parts'][0]['text'].strip()
+        else:
+            print(f"🔍 AI 응답 구조: {data}")
+            return f"🔮 {today} 운세 요약 실패 (AI가 답변을 생성하지 못했습니다. 다시 시도해 주세요.)"
     except Exception as e:
-        print(f"⚠️ 요약 실패: {e}")
-        return f"🔮 {today} 운세를 읽는 중 오류가 발생했습니다. (오류: {str(e)[:50]})"
+        return f"⚠️ 에러 발생: {str(e)}"
 
 def send_telegram(message):
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     payload = {"chat_id": TELEGRAM_CHAT_ID, "text": message}
-    requests.post(url, json=payload, timeout=10)
+    requests.post(url, json=payload)
 
 def main():
-    image_base64 = capture_full_screen()
-    if image_base64:
-        final_msg = summarize_fortune_image(image_base64)
-        send_telegram(final_msg)
-        print("✅ 작업 성공 및 전송 완료!")
+    img = capture_full_screen()
+    if img:
+        msg = summarize_fortune_image(img)
+        send_telegram(msg)
+        print("✅ 전송 완료!")
     else:
-        print("❌ 실행 실패")
+        print("❌ 실패")
 
 if __name__ == "__main__":
     main()
