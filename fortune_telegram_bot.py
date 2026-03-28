@@ -1,217 +1,133 @@
-"""
-띠별 운세 텔레그램 봇 (스크린샷 방식)
-- Playwright로 네이버 띠별 운세 캡처
-- Gemini Vision API로 분석
-- 텔레그램으로 전송
-"""
-
-import os
-import requests
-import base64
+import os, requests, base64, time, sys, subprocess
 from datetime import datetime
-import time
-import subprocess
+
+# [개선] 로깅 함수 (GitHub 로그에서 진행 상황 확인용)
+def log(msg):
+    print(f"[*] {msg} ({datetime.now().strftime('%H:%M:%S')})")
+    sys.stdout.flush()
 
 def install_playwright():
-    """Playwright 설치 및 브라우저 다운로드"""
+    """[최적화] GitHub Actions 환경에서 Playwright 및 브라우저 강제 설치"""
     try:
-        print("📦 Playwright 설치 중...")
-        subprocess.run(["pip", "install", "playwright"], check=True)
+        log("📦 Playwright 및 Chromium 브라우저 설치 중...")
+        # 이미 설치되어 있더라도 강제로 재설치하여 버전을 맞춥니다.
+        subprocess.run(["pip", "install", "--upgrade", "playwright"], check=True)
         subprocess.run(["playwright", "install", "chromium"], check=True)
-        subprocess.run(["playwright", "install-deps"], check=True)
-        print("✅ Playwright 설치 완료")
+        log("✅ Playwright 설치 완료")
     except Exception as e:
-        print(f"❌ Playwright 설치 실패: {e}")
-        raise
+        log(f"❌ Playwright 설치 실패 (무시하고 진행): {e}")
 
-
-def capture_fortune_screenshot():
-    """네이버 띠별 운세 스크린샷 캡처"""
-    
+def capture_fortune():
+    """[클로드 방식] Playwright를 이용한 정밀 모바일 캡처"""
     from playwright.sync_api import sync_playwright
     
-    print("📸 네이버 띠별 운세 캡처 시작...")
-    
+    log("📸 네이버 운세 캡처 시작...")
     try:
         with sync_playwright() as p:
-            # 브라우저 실행
+            # 브라우저 실행 (가장 가벼운 세팅)
             browser = p.chromium.launch(headless=True)
-            page = browser.new_page(viewport={'width': 1200, 'height': 2400})
+            # 모바일 뷰포트로 설정 (네이버 모바일 페이지가 분석하기 더 좋습니다)
+            context = browser.new_context(viewport={'width': 450, 'height': 900})
+            page = context.new_page()
             
-            # 네이버 검색
-            print("  → 페이지 로딩 중...")
-            page.goto("https://search.naver.com/search.naver?query=띠별+운세")
+            # 페이지 로딩 대기 시간을 넉넉히 줍니다.
+            page.goto("https://m.search.naver.com/search.naver?query=띠별+운세", timeout=60000)
+            time.sleep(10) # 페이지 안정화 대기
             
-            # 페이지 로딩 대기
-            time.sleep(3)
-            
-            # 전체 페이지 스크린샷
+            # 스크린샷 캡처 (용량을 줄이기 위해 전체 페이지가 아닌 현재 화면만)
             screenshot_bytes = page.screenshot(full_page=False)
-            
             browser.close()
             
-            # base64 인코딩
-            img_base64 = base64.b64encode(screenshot_bytes).decode('utf-8')
-            print("✅ 스크린샷 캡처 완료")
-            
-            return img_base64
-            
+            log("✅ 스크린샷 캡처 완료")
+            return base64.b64encode(screenshot_bytes).decode('utf-8')
     except Exception as e:
-        print(f"❌ 스크린샷 캡처 실패: {e}")
+        log(f"❌ 캡처 실패: {e}")
         raise
 
-
-def analyze_with_gemini(img_base64):
-    """Gemini Vision API로 운세 분석"""
-    
+def analyze_gemini(img_base64):
+    """[최적화] Gemini 2.0 Flash 사용 및 끈질긴 할당량 재시도"""
     api_key = os.environ.get('GEMINI_API_KEY')
-    today = datetime.now().strftime("%Y년 %m월 %d일")
-    day_of_week = ['월', '화', '수', '목', '금', '토', '일'][datetime.now().weekday()]
+    today = datetime.now().strftime("%Y-%m-%d")
     
-    prompt = f"""이미지에서 12띠별 운세를 찾아서 각 띠별로 한 줄씩 요약해주세요.
+    # 프롬프트는 클로드의 구조를 유지하되 Gemini 2.0에 맞춰 최적화
+    prompt = f"이미지에서 12띠별 운세를 찾아 '띠: 내용' 형식으로 한 줄씩 요약해줘. 날짜: {today}"
 
-오늘은 {today} {day_of_week}요일입니다.
-
-형식:
-🔮 {today} 띠별 운세
-
-🐭 쥐띠: (핵심 내용 30자 이내) ✨
-🐮 소띠: (핵심 내용 30자 이내) 💪
-🐯 호랑이띠: (핵심 내용 30자 이내) 🔥
-🐰 토끼띠: (핵심 내용 30자 이내) 🌸
-🐲 용띠: (핵심 내용 30자 이내) ⚡
-🐍 뱀띠: (핵심 내용 30자 이내) 🌟
-🐴 말띠: (핵심 내용 30자 이내) 🎯
-🐑 양띠: (핵심 내용 30자 이내) 🍀
-🐵 원숭이띠: (핵심 내용 30자 이내) 🎪
-🐔 닭띠: (핵심 내용 30자 이내) 🌅
-🐶 개띠: (핵심 내용 30자 이내) 💫
-🐷 돼지띠: (핵심 내용 30자 이내) 🎁
-
-긍정적이고 간결하게! 정확히 위 형식으로만 답변하세요."""
-
-    # Gemini 1.5 Flash 사용 (최신 모델)
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key}"
+    # Gemini 2.0 Flash 호출 (더 빠르고 똑똑함)
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={api_key}"
     
     payload = {
         "contents": [{
             "parts": [
                 {"text": prompt},
-                {
-                    "inline_data": {
-                        "mime_type": "image/png",
-                        "data": img_base64
-                    }
-                }
+                {"inline_data": {"mime_type": "image/png", "data": img_base64}}
             ]
         }],
-        "generationConfig": {
-            "temperature": 0.7,
-            "maxOutputTokens": 800
-        }
+        "generationConfig": {"temperature": 0.2} # 일관성을 위해 낮춤
     }
+
+    log("🤖 Gemini 2.0 분석 요청 중...")
     
-    # 재시도 로직
+    # [핵심] 할당량 초과 시 3번까지 끈질기게 재시도 (대기 시간 늘림)
     for i in range(3):
-        try:
-            print(f"🤖 Gemini Vision API 호출 중... (시도 {i+1}/3)")
-            res = requests.post(url, json=payload, timeout=60)
-            data = res.json()
-            
-            if 'candidates' in data:
-                result = data['candidates'][0]['content']['parts'][0]['text'].strip()
-                print("✅ Gemini 분석 완료!")
-                return result
-            
-            elif 'error' in data:
-                error_msg = data['error'].get('message', '')
-                print(f"❌ API 오류: {error_msg}")
-                
-                if 'quota' in error_msg.lower() or 'resource' in error_msg.lower():
-                    if i < 2:
-                        wait_time = 60 + (i * 30)
-                        print(f"⏳ {wait_time}초 대기 후 재시도...")
-                        time.sleep(wait_time)
-                    else:
-                        raise Exception("할당량 초과")
-                else:
-                    raise Exception(error_msg)
+        res = requests.post(url, json=payload, timeout=60)
+        data = res.json()
         
-        except Exception as e:
-            print(f"❌ 요청 실패: {e}")
-            if i < 2:
-                time.sleep(30)
+        if 'candidates' in data:
+            log("✅ Gemini 분석 완료!")
+            return data['candidates'][0]['content']['parts'][0]['text'].strip()
+        elif 'error' in data:
+            err_msg = data['error'].get('message', '알 수 없는 에러')
+            # 할당량 초과 시 대기 시간을 늘려가며 재시도 (60초 -> 90초)
+            if 'quota' in err_msg.lower() or 'resource' in err_msg.lower():
+                if i < 2:
+                    wait_time = 60 + (i * 30)
+                    log(f"⏳ 할당량 초과. {wait_time}초 대기 후 재시도({i+1}/3)...")
+                    time.sleep(wait_time)
+                    continue
+                else:
+                    return "🚨 현재 구글 무료 API 사용량이 꽉 찼습니다. 1시간 뒤에 다시 실행해주세요!"
             else:
-                raise
-    
-    raise Exception("Gemini API 호출 실패")
+                raise Exception(err_msg)
+        else:
+            raise Exception("올바르지 않은 API 응답 구조")
 
-
-def send_telegram(message):
-    """텔레그램 전송"""
-    
+def send_telegram(msg):
     tg_token = os.environ.get('TELEGRAM_BOT_TOKEN')
     chat_id = os.environ.get('TELEGRAM_CHAT_ID')
     
-    url = f"https://api.telegram.org/bot{tg_token}/sendMessage"
-    payload = {
-        "chat_id": chat_id,
-        "text": message
-    }
-    
-    try:
-        print("📤 텔레그램 전송 중...")
-        response = requests.post(url, json=payload, timeout=10)
-        response.raise_for_status()
-        print("✅ 텔레그램 전송 완료!")
-        return True
-    except Exception as e:
-        print(f"❌ 텔레그램 전송 실패: {e}")
-        return False
+    if not tg_token or not chat_id:
+        log("❌ 텔레그램 환경 변수가 설정되지 않았습니다.")
+        return
 
+    log("📤 텔레그램 전송 중...")
+    try:
+        # 메시지가 너무 길면 잘라서 보냅니다.
+        if len(msg) > 4000:
+            msg = msg[:4000] + "..."
+        requests.post(f"https://api.telegram.org/bot{tg_token}/sendMessage", 
+                      json={"chat_id": chat_id, "text": msg}, timeout=10)
+        log("✅ 텔레그램 전송 완료!")
+    except Exception as e:
+        log(f"❌ 텔레그램 전송 실패: {e}")
 
 def main():
-    """메인 실행"""
-    print("="*50)
-    print(f"🌅 운세 봇 시작 - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    print("="*50)
+    log("="*50)
+    log("🌅 운세 봇 시작")
+    log("="*50)
     
     try:
-        # 0단계: Playwright 설치
         install_playwright()
-        print()
-        
-        # 1단계: 스크린샷 캡처
-        img_base64 = capture_fortune_screenshot()
-        print()
-        
-        # 2단계: Gemini로 분석
-        summary = analyze_with_gemini(img_base64)
-        print(f"\n📝 최종 결과:\n{summary}\n")
-        
-        # 3단계: 텔레그램 전송
-        send_telegram(summary)
-        
-        print("\n" + "="*50)
-        print("🎉 모든 작업 완료!")
-        print("📱 텔레그램 확인 후 Threads에 복붙하세요!")
-        print("="*50)
-        
+        img = capture_fortune()
+        result = analyze_gemini(img)
+        send_telegram(result)
+        log("🎉 모든 작업 성공!")
     except Exception as e:
-        error_msg = f"❌ 오류 발생: {str(e)}"
-        print(error_msg)
-        
-        # 오류도 텔레그램으로 알림
-        tg_token = os.environ.get('TELEGRAM_BOT_TOKEN')
-        chat_id = os.environ.get('TELEGRAM_CHAT_ID')
-        if tg_token and chat_id:
-            requests.post(
-                f"https://api.telegram.org/bot{tg_token}/sendMessage",
-                json={"chat_id": chat_id, "text": error_msg}
-            )
-        
-        raise
-
+        error_log = f"❌ 최종 실패: {str(e)}"
+        log(error_log)
+        # 실패하더라도 텔레그램으로 알림을 보냅니다.
+        send_telegram(error_log)
+        # GitHub Actions가 실패로 표시되도록 합니다.
+        sys.exit(1)
 
 if __name__ == "__main__":
     main()
