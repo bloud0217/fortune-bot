@@ -45,8 +45,8 @@ def main():
 
     # 3. Gemini AI에게 요약 요청
     print("🧠 Gemini AI에게 요약 요청 중...")
-    # 새로 발급받은 키라면 v1beta의 gemini-1.5-flash 모델이 가장 확실합니다.
-    api_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
+# 기존 v1beta 대신 정식 버전인 v1을 사용합니다.
+api_url = f"https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
     
     payload = {
         "contents": [{
