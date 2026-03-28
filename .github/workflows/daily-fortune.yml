@@ -1,28 +1,24 @@
 name: daily-fortune
-
 on:
   schedule:
     - cron: '0 23 * * *'  # 한국 시간 기준 오전 8시
   workflow_dispatch:      # 수동 실행 버튼
-
 jobs:
   build:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
-
+      
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.10'
-
-      # 바로 이 부분이 '캡처 도구'를 설치하는 핵심 설정입니다!
+      
       - name: Install dependencies
         run: |
-          pip install requests beautifulsoup4 selenium webdriver-manager
-
+          pip install requests beautifulsoup4
+      
       - name: Run fortune bot
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
