@@ -1,4 +1,5 @@
 name: daily-fortune
+
 on:
   schedule:
     - cron: '0 23 * * *'  # 한국 시간 기준 오전 8시
@@ -17,6 +18,7 @@ jobs:
         with:
           python-version: '3.10'
       
+      # [최적화] Playwright 실행에 필요한 시스템 패키지를 YAML에서 직접 설치
       - name: Install system dependencies for Playwright
         run: |
           sudo apt-get update
@@ -37,12 +39,13 @@ jobs:
             libgbm1 \
             libpango-1.0-0 \
             libcairo2 \
-            libasound2t64
-      
+            libasound2  # t64 에러 방지
+
+      # [최적화] 필요한 Python 패키지를 YAML에서 직접 설치
       - name: Install Python dependencies
         run: |
-          pip install requests
-      
+          pip install requests playwright
+
       - name: Run fortune bot
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
