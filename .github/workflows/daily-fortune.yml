@@ -1,24 +1,4 @@
-name: daily-fortune
-
-on:
-  schedule:
-    - cron: '0 23 * * *'  # 한국 시간 기준 오전 8시
-  workflow_dispatch:      # 수동 실행 버튼
-
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v3
-      
-      - name: Set up Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.10'
-      
-      # [최적화] Playwright 실행에 필요한 시스템 패키지를 YAML에서 직접 설치
+# [수정 완료] 우분투 24.04(Noble) 버전에 맞는 패키지명으로 변경
       - name: Install system dependencies for Playwright
         run: |
           sudo apt-get update
@@ -39,16 +19,4 @@ jobs:
             libgbm1 \
             libpango-1.0-0 \
             libcairo2 \
-            libasound2  # t64 에러 방지
-
-      # [최적화] 필요한 Python 패키지를 YAML에서 직접 설치
-      - name: Install Python dependencies
-        run: |
-          pip install requests playwright
-
-      - name: Run fortune bot
-        env:
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: python fortune_telegram_bot.py
+            libasound2t64  # <--- 이 부분이 핵심입니다!
